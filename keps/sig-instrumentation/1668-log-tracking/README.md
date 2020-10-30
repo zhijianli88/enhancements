@@ -206,7 +206,7 @@ apiserver and controller use this API to make up a new outgoing request.
 
 ### Design of Mutating webhook(Out of tree)
 
-**1.Extract SpanContext and initialtraceid from request's header **
+**1.Extract SpanContext and initialtraceid from request's header**
 
 **2.Update SpanContext and initialtraceid to object**
 

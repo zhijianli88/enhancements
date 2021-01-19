@@ -1,94 +1,27 @@
-<!--
-**Note:** When your KEP is complete, all of these comment blocks should be removed.
-
-To get started with this template:
-
-- [ ] **Pick a hosting SIG.**
-  Make sure that the problem space is something the SIG is interested in taking
-  up. KEPs should not be checked in without a sponsoring SIG.
-- [ ] **Create an issue in kubernetes/enhancements**
-  When filing an enhancement tracking issue, please make sure to complete all
-  fields in that template. One of the fields asks for a link to the KEP. You
-  can leave that blank until this KEP is filed, and then go back to the
-  enhancement and add the link.
-- [ ] **Make a copy of this template directory.**
-  Copy this template into the owning SIG's directory and name it
-  `NNNN-short-descriptive-title`, where `NNNN` is the issue number (with no
-  leading-zero padding) assigned to your enhancement above.
-- [ ] **Fill out as much of the kep.yaml file as you can.**
-  At minimum, you should fill in the "Title", "Authors", "Owning-sig",
-  "Status", and date-related fields.
-- [ ] **Fill out this file as best you can.**
-  At minimum, you should fill in the "Summary" and "Motivation" sections.
-  These should be easy if you've preflighted the idea of the KEP with the
-  appropriate SIG(s).
-- [ ] **Create a PR for this KEP.**
-  Assign it to people in the SIG who are sponsoring this process.
-- [ ] **Merge early and iterate.**
-  Avoid getting hung up on specific details and instead aim to get the goals of
-  the KEP clarified and merged quickly. The best way to do this is to just
-  start with the high-level sections and fill out details incrementally in
-  subsequent PRs.
-
-Just because a KEP is merged does not mean it is complete or approved. Any KEP
-marked as `provisional` is a working document and subject to change. You can
-denote sections that are under active debate as follows:
-
-```
-<<[UNRESOLVED optional short context or usernames ]>>
-Stuff that is being argued.
-<<[/UNRESOLVED]>>
-```
-
-When editing KEPS, aim for tightly-scoped, single-topic PRs to keep discussions
-focused. If you disagree with what is already in a document, open a new PR
-with suggested changes.
-
-One KEP corresponds to one "feature" or "enhancement" for its whole lifecycle.
-You do not need a new KEP to move from beta to GA, for example. If
-new details emerge that belong in the KEP, edit the KEP. Once a feature has become
-"implemented", major changes should get new KEPs.
-
-The canonical place for the latest set of instructions (and the likely source
-of this file) is [here](/keps/NNNN-kep-template/README.md).
-
-**Note:** Any PRs to move a KEP to `implementable`, or significant changes once
-it is marked `implementable`, must be approved by each of the KEP approvers.
-If none of those approvers are still appropriate, then changes to that list
-should be approved by the remaining approvers and/or the owning SIG (or
-SIG Architecture for cross-cutting KEPs).
--->
-# KEP-NNNN: Your short, descriptive title
-
-<!--
-This is the title of your KEP. Keep it short, simple, and descriptive. A good
-title can help communicate what the KEP is and should be considered as part of
-any review.
--->
-
-<!--
-A table of contents is helpful for quickly jumping to sections of a KEP and for
-highlighting any additional information provided beyond the standard KEP
-template.
-
-Ensure the TOC is wrapped with
-  <code>&lt;!-- toc --&rt;&lt;!-- /toc --&rt;</code>
-tags, and then generate with `hack/update-toc.sh`.
--->
+# KEP-1961: Propagate object trace information
 
 <!-- toc -->
 - [Release Signoff Checklist](#release-signoff-checklist)
 - [Summary](#summary)
 - [Motivation](#motivation)
+  - [Definitions](#definitions)
   - [Goals](#goals)
   - [Non-Goals](#non-goals)
+- [Background](#background)
 - [Proposal](#proposal)
-  - [User Stories (Optional)](#user-stories-optional)
-    - [Story 1](#story-1)
-    - [Story 2](#story-2)
-  - [Notes/Constraints/Caveats (Optional)](#notesconstraintscaveats-optional)
+  - [Architecture](#architecture)
+  - [Trace context propagation](#trace-context-propagation)
+  - [Mutating admission webhook](#mutating-admission-webhook)
   - [Risks and Mitigations](#risks-and-mitigations)
 - [Design Details](#design-details)
+  - [In-tree changes](#in-tree-changes)
+    - [Trace Utility Package](#trace-utility-package)
+    - [Add Go context to parameter list](#add-go-context-to-parameter-list)
+  - [Out-of-tree changes](#out-of-tree-changes)
+    - [Mutating webhook](#mutating-webhook)
+  - [Behaviors with and without Mutating webhook](#behaviors-with-and-without-mutating-webhook)
+    - [with Mutating webhook](#with-mutating-webhook)
+    - [without Mutating webhook](#without-mutating-webhook)
   - [Test Plan](#test-plan)
   - [Graduation Criteria](#graduation-criteria)
   - [Upgrade / Downgrade Strategy](#upgrade--downgrade-strategy)
@@ -146,24 +79,7 @@ Items marked with (R) are required *prior to targeting to a milestone / release*
 
 ## Summary
 
-<!--
-This section is incredibly important for producing high-quality, user-focused
-documentation such as release notes or a development roadmap. It should be
-possible to collect this information before implementation begins, in order to
-avoid requiring implementors to split their attention between writing release
-notes and implementing the feature itself. KEP editors and SIG Docs
-should help to ensure that the tone and content of the `Summary` section is
-useful for a wide audience.
-
-A good summary is probably at least a paragraph in length.
-
-Both in this section and below, follow the guidelines of the [documentation
-style guide]. In particular, wrap lines to a reasonable length, to make it
-easier for reviewers to cite specific portions, and to minimize diff churn on
-updates.
-
-[documentation style guide]: https://github.com/kubernetes/community/blob/master/contributors/guide/style-guide.md
--->
+This KEP proposes to propagate trace context across components and across a series of related objects originating from a user request. It lays the foundation for enhancing relevant but scattered logs with the trace information as common identifiers.
 
 ## Motivation
 
@@ -176,52 +92,43 @@ demonstrate the interest in a KEP within the wider Kubernetes community.
 [experience reports]: https://github.com/golang/go/wiki/ExperienceReports
 -->
 
+### Definitions
+
+**Span**: The smallest unit of a trace.  It has a start and end time, and is attached to a single trace.
+**Trace**: A collection of Spans which represents a single process.
+**Trace Context**: A reference to a Trace that is designed to be propagated across component boundaries.  Sometimes referred to as the "Span Context".  It is can be thought of as a pointer to a parent span that child spans can be attached to.
+**Baggage**:  It is an abstract data type represented by a set of name/value pairs describing user-defined properties. It is used to annotate telemetry, adding context and information to metrics, traces, and logs.
+
 ### Goals
 
-<!--
-List the specific goals of the KEP. What is it trying to achieve? How will we
-know that this has succeeded?
--->
+- Trace context generated by [API Server Tracing](https://github.com/kubernetes/enhancements/issues/647) can be propagated across kubernetes components
+- A set of objects with relationship(OwnerRef/Non-ownerRef) can be linked by this trace information
 
 ### Non-Goals
 
-<!--
-What is out of scope for this KEP? Listing non-goals helps to focus discussion
-and make progress.
--->
+- Generate new trace context(Span)
+- Replace/change existing logging, metrics, or the events API
+- Add additional telemetry to any components which is already done by [API Server Tracing](https://github.com/kubernetes/enhancements/issues/647). 
+- Run any additional OpenTelemetry components (such as the OpenTelemetry collector, which the  [API Server Tracing](https://github.com/kubernetes/enhancements/issues/647) KEP uses)
+
+## Background
+It's Known that all requests to Kubernetes will reach API Server first, in order to propagate trace context from controllers to mutating admission controller, we require API Server to support propagating these trace context from its incoming request to outgoing request as well. Fortunately there is already a [API Server Tracing](https://github.com/kubernetes/enhancements/issues/647) KEP to do this.
 
 ## Proposal
 
-<!--
-This is where we get down to the specifics of what the proposal actually is.
-This should have enough detail that reviewers can understand exactly what
-you're proposing, but should not include things like API designs or
-implementation. What is the desired outcome and how do we measure success?.
-The "Design Details" section below is for the real
-nitty-gritty.
--->
+### Architecture
 
-### User Stories (Optional)
+### Trace context propagation
 
-<!--
-Detail the things that people will be able to do if this KEP is implemented.
-Include as much detail as possible so that people can understand the "how" of
-the system. The goal here is to make this feel real for users without getting
-bogged down.
--->
+To link work done across components as belonging to the same action(user request), we must pass trace context across process boundaries. In traditional distributed systems, this context can be passed down through RPC metadata or HTTP headers. Kubernetes, however, due to its watch-based nature, requires us to attach trace context directly to the target object.
 
-#### Story 1
+In this proposal, we choose to propagate this trace context as object annotations called `trace.kubernetes.io/context`
 
-#### Story 2
+###  Mutating admission webhook
 
-### Notes/Constraints/Caveats (Optional)
+For trace context to be correlated as part of the same action, we must extract the trace context from the incomming request and embed it in target objects. To accomplish this, we have introduced an [out-of-tree mutating admission webhook](https://github.com/Hellcatlk/mutating-trace-admission-controller/tree/trace-ot).
 
-<!--
-What are the caveats to the proposal?
-What are some important details that didn't come across above?
-Go in to as much detail as necessary here.
-This might be a good place to talk about core concepts and how they relate.
--->
+The proposed in-tree changes will utilize the span context annotation injected into objects with this webhook.
 
 ### Risks and Mitigations
 
@@ -239,12 +146,77 @@ Consider including folks who also work outside the SIG or subproject.
 
 ## Design Details
 
-<!--
-This section should contain enough information that the specifics of your
-change are understandable. This may include API specs (though not always
-required) or even code snippets. If there's any ambiguity about HOW your
-proposal will be implemented, this is the place to discuss them.
--->
+### In-tree changes
+
+#### Trace Utility Package
+
+This package will be able to retrieved span from the span context embedded in the trace.kubernetes.io/context object annotation. This package will facilitate propagating traces through kubernetes objects. The exported functions include:
+
+```go
+// WithObject returns a context attached with a Span retrieved from object annotation, it doesn't start a new span
+func WithObject(ctx context.Context, obj meta.Object) (context.Context, error)
+```
+
+#### Add Go context to parameter list
+In OpenTelemetry's Go implementation,  span context is passed down through Go context. This will necessitate the threading of context across more of the Kubernetes codebase, which is a [desired outcome regardless](https://github.com/kubernetes/kubernetes/issues/815). In alpha stage,  we need to change some APIs by adding `ctx context.Context` to parameter list whose parameters doesn't contain context.Context yet. Below APIs will be impacted so far.
+
+| APIs                          | file name                                                    |
+| ----------------------------- | ------------------------------------------------------------ |
+| createPods()                  | pkg/controller/controller_utils.go                           |
+| CreatePodsWithControllerRef() | pkg/controller/controller_utils.go<br />pkg/controller/replication/conversion.go<br />pkg/controller/daemon/daemon_controller.go<br />pkg/controller/replication/conversion.go |
+
+### Out-of-tree changes
+
+#### Mutating webhook
+We use mutating admission controller(aka webhook)  to change/update the object annotation. It takes advantages of:
+
+- Ease of use. Using client-go with a context.Context is easier than adding an annotation. The webhook takes care of writing the annotation.
+- Object to object context propagation. Without the mutating admission controller, we can only associate actions from a single object. With the mutating admission controller, the logging metadata would be added for objects modified by controllers of the initial object (e.g. metadata added to a deployment annotation would appear in pod logs).
+
+This mutating admission webhook extracts  a `span context` from incoming request, and then stores it into object annotation`trace.kubernetes.io/context` with base64 encoded version of [this wire format](https://github.com/census-instrumentation/opencensus-specs/blob/master/encodings/BinaryEncoding.md#trace-context). The webhook can be configured to inject context into only target object types.
+
+below is a key/value pair example in object annotation :
+
+| key               | value(encoded)                       | origin value(decoded)                                   | description                                                  |
+| ---------------------------- | ------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| trace.kubernetes.io/context | 0/3kO3imLJzu3N54RTuOEUDbc2C0poIMAA== | 00-ca057eae1a26b66314fe3e361eedc5ca-3696483da6bfdcea-00 |it consists of `<version>-<traceid>-<spanid>-<flag>`. <br />A corresponding http header field is like `traceparent: 00-ca057eae1a26b66314fe3e361eedc5ca-3696483da6bfdcea-00` which is a w3c specific [trace-context](https://w3c.github.io/trace-context/#traceparent-header ). <br />|
+
+### Behaviors with and without Mutating webhook
+Since the mutating webhook is optional for users, we will explain the different behaviors between with and without mutating webhook.
+
+#### with Mutating webhook
+
+**kubectl request**:
+
+- APIServer uses otel to start a new Span
+- APIServer uses otel to propagate `span context` to the other end(webhook)
+- Webhook persists `span context` to object
+
+**controllers request:**
+
+- Controller uses otel to start a related Span, which connected to the `span context` in object
+- Controller uses otel to propagate `span context`  to the other end(APIServer)
+- APIServer uses otel  to start a related Span, which connected to the SpancContext from the  incoming request
+- APIServer uses otel to propagate `span context`  to the other end(webhook)
+- Webhook persists `span context` to object
+
+#### without Mutating webhook
+
+**kubectl request:**
+
+- APIServer uses otel to start a new Span
+- APIServer uses otel to propagate `span context` to the other end
+- ~~Webhook persists `span context` to object~~
+
+**controllers request:**
+
+- Controller start uses otel to start a new Span
+- Controller uses otel to propagate `span context`  to the other end(APIServer)
+- APIServer uses otel  to start related Span, which connected to the SpancContext from the  incoming request
+- APIServer uses otel to propagate `span context` to the other end
+- ~~Webhook persists `span context`  to object~~
+
+In short, the webhook decides whether to add `span context` to the object.
 
 ### Test Plan
 

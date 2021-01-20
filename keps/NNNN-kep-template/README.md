@@ -79,7 +79,7 @@ Items marked with (R) are required *prior to targeting to a milestone / release*
 
 ## Summary
 
-This KEP proposes to propagate trace context across components and across a series of related objects originating from a user request. It lays the foundation for enhancing relevant but scattered logs with the trace information as common identifiers.
+This KEP proposes to propagate trace context across components and across a series of related objects originating from an user request. It lays the foundation for enhancing relevant but scattered logs with the trace information as common identifiers.
 
 ## Motivation
 
@@ -196,7 +196,7 @@ Since the mutating webhook is optional for users, we will explain the different 
 
 - Controller uses otel to start a related Span, which connected to the `span context` in object
 - Controller uses otel to propagate `span context`  to the other end(APIServer)
-- APIServer uses otel  to start a related Span, which connected to the SpancContext from the  incoming request
+- APIServer uses otel  to start a related Span, which connected to the `span context` from the  incoming request
 - APIServer uses otel to propagate `span context`  to the other end(webhook)
 - Webhook persists `span context` to object
 
@@ -212,7 +212,7 @@ Since the mutating webhook is optional for users, we will explain the different 
 
 - Controller start uses otel to start a new Span
 - Controller uses otel to propagate `span context`  to the other end(APIServer)
-- APIServer uses otel  to start related Span, which connected to the SpancContext from the  incoming request
+- APIServer uses otel  to start related Span, which connected to the `span context` from the  incoming request
 - APIServer uses otel to propagate `span context` to the other end
 - ~~Webhook persists `span context`  to object~~
 

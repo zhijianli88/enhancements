@@ -304,7 +304,7 @@ In short, the webhook decides whether to add `span context` to the object.
 #### Alpha
 
 - Feature covers 3 important workload objects: Pod, Replicaset, Deployment, Statefulset, Daemonset
-- Related unit tests described in this KEP are completed
+- e2e tests and related unit tests described in this KEP are completed
 
 #### Beta
 
